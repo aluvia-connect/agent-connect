@@ -1,0 +1,70 @@
+{
+  "name": "@aluvia-connect/agent-connect",
+  "version": "1.0.0",
+  "description": "Automatic retry and proxy fallback for Playwright powered by Aluvia",
+  "homepage": "https://github.com/aluvia-connect/agent-connect#readme",
+  "bugs": {
+    "url": "https://github.com/aluvia-connect/agent-connect/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aluvia-connect/agent-connect.git"
+  },
+  "license": "MIT",
+  "author": "Aluvia",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
+    "release:check": "npm run build && npm pack --dry-run",
+    "release:tag": "git tag v$(node -p \"require('./package.json').version\")",
+    "release:push": "git push origin main && git push origin --tags",
+    "release:version": "node -p \"require('./package.json').version\"",
+    "audit:check": "npm audit --audit-level moderate",
+    "test": "vitest run --reporter=dot",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "playwright",
+    "proxy",
+    "aluvia",
+    "retry",
+    "automation",
+    "typescript"
+  ],
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "dependencies": {
+    "aluvia-ts-sdk": "^2.1.2",
+    "proxy-chain": "^2.3.0"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "@vitest/coverage-v8": "^4.0.3",
+    "playwright": "^1.56.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
