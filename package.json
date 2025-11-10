@@ -1,6 +1,6 @@
 {
   "name": "@aluvia-connect/agent-connect",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Automatic retry and proxy fallback for Playwright powered by Aluvia",
   "homepage": "https://github.com/aluvia-connect/agent-connect#readme",
   "bugs": {
