@@ -1,6 +1,6 @@
 # Agent Connect
 
-[![npm version](https://badge.fury.io/js/agent-connect.svg)](https://www.npmjs.com/package/agent-connect)
+[![npm version](https://badge.fury.io/js/@aluvia-connect/agent-connect.svg)](https://www.npmjs.com/package/@aluvia-connect/agent-connect)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org)
 

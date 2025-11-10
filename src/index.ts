@@ -521,7 +521,7 @@ export async function startDynamicProxy(port?: number): Promise<DynamicProxy> {
       upstream = p;
     },
     async close() {
-      try { await server.close(false); } catch {}
+      try { await server.close(true); } catch {}
     },
     currentUpstream() { return upstream; },
   };

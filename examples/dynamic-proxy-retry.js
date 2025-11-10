@@ -6,7 +6,7 @@
  * proxy WITHOUT relaunching the browser, then retry.
  *
  * Usage (from repo root):
- *   npm run build
+ *   npm install
  *   npx playwright install
  *   ALUVIA_API_KEY=<API KEY> node examples/dynamic-proxy-retry.js
  */
