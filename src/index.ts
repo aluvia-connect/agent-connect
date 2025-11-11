@@ -217,9 +217,11 @@ async function getAluviaProxy(): Promise<ProxySettings> {
     );
   }
 
+  const sessionId = generateSessionId();
+
   return {
     server: `http://${proxy.host}:${proxy.httpPort}`,
-    username: proxy.username,
+    username: `${proxy.username}-session-${sessionId}`,
     password: proxy.password,
   };
 }
@@ -270,6 +272,10 @@ function compileRetryable(
         : msg.includes(p) || code.includes(p) || name.includes(p)
     );
   };
+}
+
+function generateSessionId(): string {
+  return Math.random().toString(36).substring(2, 10);
 }
 
 function inferBrowserTypeFromPage(page: Page): BrowserType<Browser> {
