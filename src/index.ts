@@ -1,4 +1,5 @@
 import type {
+  BrowserContext,
   Page,
   Response,
 } from "playwright";
@@ -261,6 +262,7 @@ function generateSessionId(): string {
 }
 
 const GOTO_ORIGINAL = Symbol.for("aluvia.gotoOriginal");
+const CONTEXT_LISTENER_ATTACHED = new WeakSet<BrowserContext>();
 
 export function agentConnect(
   page: Page,
@@ -287,6 +289,15 @@ export function agentConnect(
       const run = async () => {
         let basePage: Page = page;
         let lastErr: unknown;
+
+        // One-time attach context close listener to shut down dynamic proxy
+        if (dynamicProxy) {
+          const ctx = basePage.context();
+          if (!CONTEXT_LISTENER_ATTACHED.has(ctx)) {
+            ctx.on('close', () => { try { dynamicProxy.close(); } catch {} });
+            CONTEXT_LISTENER_ATTACHED.add(ctx);
+          }
+        }
 
         // First attempt without proxy
         try {

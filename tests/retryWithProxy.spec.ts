@@ -198,4 +198,24 @@ describe("agentConnect (mocked Playwright)", () => {
     expect(new Set(usernames).size).toBe(usernames.length); // all unique
     await dyn.close();
   });
+
+  it("dynamicProxy auto-closes when context closes (one-time listener)", async () => {
+    const dyn = await startDynamicProxy();
+    const originalClose = dyn.close.bind(dyn);
+    const closeSpy = vi.fn(async () => originalClose());
+    // Patch close to spy
+    (dyn as any).close = closeSpy;
+
+    // Force a retryable failure so goto rejects, ensuring listener still attached
+    page.__setGoto(async () => { throw Object.assign(new Error("Timeout"), { code: "Timeout" }); });
+
+    await expect(
+      agentConnect(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 0 }).goto(DATA_OK)
+    ).rejects.toThrow();
+
+    // Trigger context close event
+    await page.context().close();
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
 });

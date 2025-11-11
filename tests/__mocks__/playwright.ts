@@ -36,6 +36,7 @@ export class FakePage {
 export class FakeContext {
   private _browser: FakeBrowser;
   private _pages: FakePage[] = [];
+  private _events: Record<string, Function[]> = {};
 
   constructor(browser: FakeBrowser) {
     this._browser = browser;
@@ -55,7 +56,17 @@ export class FakeContext {
     return this._browser;
   }
 
-  async close() {}
+  on(event: string, cb: Function) {
+    (this._events[event] ||= []).push(cb);
+  }
+
+  async close() {
+    (this._events["close"] || []).forEach((fn) => {
+      try {
+        fn({});
+      } catch {}
+    });
+  }
 
   // Optional fields some SDKs read
   _options = {
