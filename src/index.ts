@@ -30,7 +30,7 @@ export type RetryPattern = string | RegExp;
 
 type GoToOptions = NonNullable<Parameters<Page["goto"]>[1]>;
 
-export interface RetryWithProxyRunner {
+export interface AgentConnectRunner {
   goto(
     url: string,
     options?: GoToOptions
@@ -64,7 +64,7 @@ export class AluviaError extends Error {
   }
 }
 
-export interface RetryWithProxyOptions {
+export interface AgentConnectOptions {
   /**
    * Number of retry attempts after the first failed navigation.
    *
@@ -123,7 +123,7 @@ export interface RetryWithProxyOptions {
   /**
    * Optional custom proxy provider used to fetch proxy credentials.
    *
-   * By default, `retryWithProxy` automatically uses the Aluvia API
+   * By default, `agentConnect` automatically uses the Aluvia API
    * via the `aluvia-ts-sdk` and reads the API key from
    * `process.env.ALUVIA_API_KEY`.
    *
@@ -137,7 +137,7 @@ export interface RetryWithProxyOptions {
    * @default Uses the built-in Aluvia client with `process.env.ALUVIA_API_KEY`
    * @example
    * ```ts
-   * import { retryWithProxy } from "agent-connect";
+   * import { agentConnect } from "agent-connect";
    *
    * // Custom proxy provider example
    * const myProxyProvider = {
@@ -151,7 +151,7 @@ export interface RetryWithProxyOptions {
    *   },
    * };
    *
-   * const { response, page } = await retryWithProxy(page, {
+   * const { response, page } = await agentConnect(page, {
    *   proxyProvider: myProxyProvider,
    *   maxRetries: 3,
    * });
@@ -185,7 +185,7 @@ export interface RetryWithProxyOptions {
    *
    * To use: const dyn = await startDynamicProxy();
    * chromium.launch({ proxy: { server: dyn.url } })
-   * Then pass { dynamicProxy: dyn } to retryWithProxy().
+   * Then pass { dynamicProxy: dyn } to agentConnect().
    */
   dynamicProxy?: DynamicProxy;
 }
@@ -326,10 +326,10 @@ async function relaunchWithProxy(
 
 const GOTO_ORIGINAL = Symbol.for("aluvia.gotoOriginal");
 
-export function retryWithProxy(
+export function agentConnect(
   page: Page,
-  options?: RetryWithProxyOptions
-): RetryWithProxyRunner {
+  options?: AgentConnectOptions
+): AgentConnectRunner {
   const {
     maxRetries = ENV_MAX_RETRIES,
     backoffMs = ENV_BACKOFF_MS,

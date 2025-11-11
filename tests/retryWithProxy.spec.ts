@@ -23,7 +23,7 @@ vi.mock("proxy-chain", () => ({
 }));
 
 // Import after mocks
-import { retryWithProxy, startDynamicProxy } from "../src/index";
+import { agentConnect, startDynamicProxy } from "../src/index";
 import { FakeBrowser, FakePage, __setOnLaunch } from "./__mocks__/playwright";
 
 const DATA_OK = "data:text/html,<title>ok</title>ok";
@@ -35,7 +35,7 @@ async function makeBrowserAndPage() {
   return { browser: b, page: p };
 }
 
-describe("retryWithProxy (mocked Playwright)", () => {
+describe("agentConnect (mocked Playwright)", () => {
   let browser: FakeBrowser;
   let page: FakePage;
 
@@ -78,7 +78,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       return null; // success on retry
     });
 
-    const { page: p2 } = await retryWithProxy(page as any, {
+    const { page: p2 } = await agentConnect(page as any, {
       maxRetries: 1,
       backoffMs: 1,
       proxyProvider: customProxyProvider,
@@ -93,7 +93,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
   it("succeeds without retry on first attempt", async () => {
     page.__setGoto(async () => null); // immediate success
 
-    const { response, page: p2 } = await retryWithProxy(page as any).goto(
+    const { response, page: p2 } = await agentConnect(page as any).goto(
       DATA_OK
     );
 
@@ -115,7 +115,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       return null;
     });
 
-    const { response, page: p2 } = await retryWithProxy(page as any, {
+    const { response, page: p2 } = await agentConnect(page as any, {
       maxRetries: 2,
       backoffMs: 1,
       closeOldBrowser: false,
@@ -134,7 +134,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
     });
 
     await expect(
-      retryWithProxy(page as any, { maxRetries: 0 }).goto(DATA_OK)
+      agentConnect(page as any, { maxRetries: 0 }).goto(DATA_OK)
     ).rejects.toBeInstanceOf(Error);
   });
 
@@ -151,7 +151,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       return null;
     });
 
-    const { page: p2 } = await retryWithProxy(localPage as any, {
+    const { page: p2 } = await agentConnect(localPage as any, {
       maxRetries: 1,
       backoffMs: 1,
       closeOldBrowser: false,
@@ -169,7 +169,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       throw e;
     });
 
-    const { page: p2 } = await retryWithProxy(page as any, {
+    const { page: p2 } = await agentConnect(page as any, {
       maxRetries: 2,
       backoffMs: 1,
       closeOldBrowser: false,
@@ -189,7 +189,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       return null;
     });
 
-    const { page: same } = await retryWithProxy(page as any, {
+    const { page: same } = await agentConnect(page as any, {
       maxRetries: 2,
       backoffMs: 1,
       dynamicProxy: dyn,
@@ -207,7 +207,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
     const dyn = await startDynamicProxy();
     page.__setGoto(async () => { throw new Error("NonRetryable") });
     await expect(
-      retryWithProxy(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 2 }).goto(DATA_OK)
+      agentConnect(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 2 }).goto(DATA_OK)
     ).rejects.toThrow();
     await dyn.close();
   });
@@ -220,7 +220,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
       if (attempts < 3) throw Object.assign(new Error("Timeout"), { code: "Timeout" });
       return null;
     });
-    const { page: same } = await retryWithProxy(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 5, backoffMs: 0 }).goto(DATA_OK);
+    const { page: same } = await agentConnect(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 5, backoffMs: 0 }).goto(DATA_OK);
     expect(attempts).toBe(3); // first + two retries
     expect(same).toBe(page as any);
     await dyn.close();
@@ -230,7 +230,7 @@ describe("retryWithProxy (mocked Playwright)", () => {
     const dyn = await startDynamicProxy();
     page.__setGoto(async () => { throw Object.assign(new Error("Timeout"), { code: "Timeout" }); });
     await expect(
-      retryWithProxy(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 0 }).goto(DATA_OK)
+      agentConnect(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 0 }).goto(DATA_OK)
     ).rejects.toThrow();
     await dyn.close();
   });

@@ -26,13 +26,13 @@ pnpm add @aluvia-connect/agent-connect
 
 ```typescript
 import { chromium } from "playwright";
-import { retryWithProxy } from "@aluvia-connect/agent-connect";
+import { agentConnect } from "@aluvia-connect/agent-connect";
 
 const browser = await chromium.launch();
 const context = await browser.newContext();
 const page = await context.newPage();
 
-const { response, page: retriedPage } = await retryWithProxy(page).goto(
+const { response, page: retriedPage } = await agentConnect(page).goto(
   "https://blocked-website.com"
 );
 
@@ -52,7 +52,7 @@ ALUVIA_API_KEY=your_aluvia_api_key
 
 ## Configuration
 
-You can control how `retryWithProxy` behaves using environment variables or options passed in code.
+You can control how `agentConnect` behaves using environment variables or options passed in code.
 The environment variables set defaults globally, while the TypeScript options let you override them per call.
 
 ### Environment Variables
@@ -75,12 +75,12 @@ ALUVIA_RETRY_ON=ECONNRESET,ETIMEDOUT,net::ERR,Timeout
 
 ### TypeScript Options
 
-You can also configure behavior programmatically by passing options to `retryWithProxy()`.
+You can also configure behavior programmatically by passing options to `agentConnect()`.
 
 ```typescript
-import { retryWithProxy } from "@aluvia-connect/agent-connect";
+import { agentConnect } from "@aluvia-connect/agent-connect";
 
-const { response, page } = await retryWithProxy(page, {
+const { response, page } = await agentConnect(page, {
   maxRetries: 3,
   backoffMs: 500,
   retryOn: ["ECONNRESET", /403/],
@@ -122,7 +122,7 @@ const myProxyProvider = {
   },
 };
 
-const { response, page } = await retryWithProxy(page, {
+const { response, page } = await agentConnect(page, {
   proxyProvider: myProxyProvider,
   maxRetries: 3,
 });
@@ -134,12 +134,12 @@ To avoid relaunching the browser for each retry you can run a local proxy that d
 
 1. Start the dynamic proxy.
 2. Launch Playwright pointing at its local address.
-3. Pass the dynamic proxy into `retryWithProxy`.
+3. Pass the dynamic proxy into `agentConnect`.
 4. On a retryable failure the upstream proxy is fetched and swapped; navigation is re-attempted on the same page instance.
 
 ```ts
 import { chromium } from "playwright";
-import { retryWithProxy, startDynamicProxy } from "@aluvia-connect/agent-connect";
+import { agentConnect, startDynamicProxy } from "@aluvia-connect/agent-connect";
 
 // Start local proxy-chain server (random free port)
 const dyn = await startDynamicProxy();
@@ -149,7 +149,7 @@ const browser = await chromium.launch({ proxy: { server: dyn.url } });
 const context = await browser.newContext();
 const page = await context.newPage();
 
-const { page: samePage } = await retryWithProxy(page, {
+const { page: samePage } = await agentConnect(page, {
   dynamicProxy: dyn,
   maxRetries: 2,
   retryOn: ["Timeout", /net::ERR/],
