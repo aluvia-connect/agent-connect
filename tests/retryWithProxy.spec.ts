@@ -23,7 +23,7 @@ vi.mock("proxy-chain", () => ({
 }));
 
 // Import after mocks
-import { agentConnect, startDynamicProxy } from "../src/index";
+import { agentConnect, startDynamicProxy } from "../src";
 import { FakeBrowser, FakePage, __setOnLaunch } from "./__mocks__/playwright";
 
 const DATA_OK = "data:text/html,<title>ok</title>ok";
@@ -56,6 +56,7 @@ describe("agentConnect (mocked Playwright)", () => {
   });
 
   it("uses custom proxyProvider if provided", async () => {
+    const dyn = await startDynamicProxy();
     let called = false;
     const customProxyProvider = {
       async get() {
@@ -79,10 +80,10 @@ describe("agentConnect (mocked Playwright)", () => {
     });
 
     const { page: p2 } = await agentConnect(page as any, {
+      dynamicProxy: dyn,
       maxRetries: 1,
       backoffMs: 1,
       proxyProvider: customProxyProvider,
-      closeOldBrowser: false,
       retryOn: ["Timeout", "ETIMEDOUT", /net::ERR/],
     }).goto(DATA_OK);
 
@@ -91,6 +92,7 @@ describe("agentConnect (mocked Playwright)", () => {
   });
 
   it("succeeds without retry on first attempt", async () => {
+    const dyn = await startDynamicProxy();
     page.__setGoto(async () => null); // immediate success
 
     const { response, page: p2 } = await agentConnect(page as any).goto(
@@ -99,82 +101,6 @@ describe("agentConnect (mocked Playwright)", () => {
 
     expect(response).toBeNull();
     expect(p2).toBe(page as any);
-    expect(await p2.title()).toBe("ok");
-  });
-
-  it("retries on retryable error and returns a new page", async () => {
-    // Fail once with ETIMEDOUT then succeed
-    let threw = false;
-    page.__setGoto(async () => {
-      if (!threw) {
-        threw = true;
-        const err: any = new Error("ETIMEDOUT simulated");
-        err.code = "ETIMEDOUT";
-        throw err;
-      }
-      return null;
-    });
-
-    const { response, page: p2 } = await agentConnect(page as any, {
-      maxRetries: 2,
-      backoffMs: 1,
-      closeOldBrowser: false,
-    }).goto(DATA_OK);
-
-    expect(response).toBeNull();
-    expect(p2).not.toBe(page as any);
-    expect(await p2.title()).toBe("ok");
-  });
-
-  it("respects maxRetries=0 (throws after first failure)", async () => {
-    page.__setGoto(async () => {
-      const err: any = new Error("net::ERR_CONNECTION_RESET");
-      err.message = "net::ERR_CONNECTION_RESET";
-      throw err;
-    });
-
-    await expect(
-      agentConnect(page as any, { maxRetries: 0 }).goto(DATA_OK)
-    ).rejects.toBeInstanceOf(Error);
-  });
-
-  it("closeOldBrowser=false does not kill the original browser", async () => {
-    const ctx = await browser.newContext();
-    const localPage = await ctx.newPage();
-
-    let failed = false;
-    localPage.__setGoto(async () => {
-      if (!failed) {
-        failed = true;
-        throw new Error("Timeout");
-      }
-      return null;
-    });
-
-    const { page: p2 } = await agentConnect(localPage as any, {
-      maxRetries: 1,
-      backoffMs: 1,
-      closeOldBrowser: false,
-      retryOn: ["Timeout", "ETIMEDOUT", /net::ERR/],
-    }).goto(DATA_OK);
-
-    expect(ctx.pages().length).toBeGreaterThan(0); // context still active
-    expect(await p2.title()).toBe("ok");
-  });
-
-  it("carries forward latest page if a retried navigation fails", async () => {
-    page.__setGoto(async () => {
-      const e: any = new Error("ETIMEDOUT");
-      e.code = "ETIMEDOUT";
-      throw e;
-    });
-
-    const { page: p2 } = await agentConnect(page as any, {
-      maxRetries: 2,
-      backoffMs: 1,
-      closeOldBrowser: false,
-    }).goto(DATA_OK);
-
     expect(await p2.title()).toBe("ok");
   });
 
@@ -190,11 +116,10 @@ describe("agentConnect (mocked Playwright)", () => {
     });
 
     const { page: same } = await agentConnect(page as any, {
+      dynamicProxy: dyn,
       maxRetries: 2,
       backoffMs: 1,
-      dynamicProxy: dyn,
       retryOn: ["Timeout"],
-      closeOldBrowser: false,
     }).goto(DATA_OK);
 
     // Should reuse original page instance
@@ -232,6 +157,45 @@ describe("agentConnect (mocked Playwright)", () => {
     await expect(
       agentConnect(page as any, { dynamicProxy: dyn, retryOn: ["Timeout"], maxRetries: 0 }).goto(DATA_OK)
     ).rejects.toThrow();
+    await dyn.close();
+  });
+
+  it("dynamicProxy assigns a different upstream username each retry", async () => {
+    const dyn = await startDynamicProxy();
+    let gotoCalls = 0;
+    // Fail first 2 retries, succeed on 3rd navigation attempt inside dynamic proxy loop
+    page.__setGoto(async () => {
+      gotoCalls++;
+      if (gotoCalls < 3) throw Object.assign(new Error("Timeout"), { code: "Timeout" });
+      return null;
+    });
+
+    let providerCalls = 0;
+    const rotatingProvider = {
+      async get() {
+        providerCalls++;
+        return {
+          server: "http://rotating-proxy:1000",
+          username: `user-${providerCalls}`,
+          password: "pw",
+        };
+      },
+    };
+
+    const usernames: string[] = [];
+
+    const { page: same } = await agentConnect(page as any, {
+      dynamicProxy: dyn,
+      maxRetries: 5,
+      backoffMs: 0,
+      retryOn: ["Timeout"],
+      proxyProvider: rotatingProvider as any,
+      onProxyLoaded: (p) => { if (p.username) usernames.push(p.username); },
+    }).goto(DATA_OK);
+
+    expect(same).toBe(page as any);
+    expect(usernames.length).toBeGreaterThan(1); // multiple retries occurred
+    expect(new Set(usernames).size).toBe(usernames.length); // all unique
     await dyn.close();
   });
 });

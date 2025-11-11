@@ -58,9 +58,9 @@ The environment variables set defaults globally, while the TypeScript options le
 ### Environment Variables
 
 | Variable             | Description                                                                              | Default                                 |
-| -------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------- |
+| -------------------- | ---------------------------------------------------------------------------------------- |-----------------------------------------|
 | `ALUVIA_API_KEY`     | Required unless you provide a custom `proxyProvider`. Used to fetch proxies from Aluvia. | _none_                                  |
-| `ALUVIA_MAX_RETRIES` | Number of retry attempts after the first failed navigation.                              | `1`                                     |
+| `ALUVIA_MAX_RETRIES` | Number of retry attempts after the first failed navigation.                              | `2`                                     |
 | `ALUVIA_BACKOFF_MS`  | Base delay (ms) between retries, grows exponentially with jitter.                        | `300`                                   |
 | `ALUVIA_RETRY_ON`    | Comma-separated list of retryable error substrings.                                      | `ECONNRESET,ETIMEDOUT,net::ERR,Timeout` |
 
@@ -68,7 +68,7 @@ The environment variables set defaults globally, while the TypeScript options le
 
 ```env
 ALUVIA_API_KEY=your_aluvia_api_key
-ALUVIA_MAX_RETRIES=2
+ALUVIA_MAX_RETRIES=1
 ALUVIA_BACKOFF_MS=500
 ALUVIA_RETRY_ON=ECONNRESET,ETIMEDOUT,net::ERR,Timeout
 ```
@@ -100,8 +100,8 @@ const { response, page } = await agentConnect(page, {
 #### Available Options
 
 | Option            | Type                                                                                 | Default                                  | Description                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `maxRetries`      | `number`                                                                             | `process.env.ALUVIA_MAX_RETRIES` or `1`  | Number of retry attempts after the first failure.                                                             |
+| ----------------- | ------------------------------------------------------------------------------------ |------------------------------------------| ------------------------------------------------------------------------------------------------------------- |
+| `maxRetries`      | `number`                                                                             | `process.env.ALUVIA_MAX_RETRIES` or `2`  | Number of retry attempts after the first failure.                                                             |
 | `backoffMs`       | `number`                                                                             | `process.env.ALUVIA_BACKOFF_MS` or `300` | Base delay (in ms) between retries, grows exponentially with jitter.                                          |
 | `retryOn`         | `(string \| RegExp)[]`                                                               | `process.env.ALUVIA_RETRY_ON`            | Error patterns considered retryable.                                                                          |
 | `closeOldBrowser` | `boolean`                                                                            | `true`                                   | Whether to close the old browser when relaunching.                                                            |
