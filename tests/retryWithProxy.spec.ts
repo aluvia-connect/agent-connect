@@ -95,7 +95,9 @@ describe("agentConnect (mocked Playwright)", () => {
     const dyn = await startDynamicProxy();
     page.__setGoto(async () => null); // immediate success
 
-    const { response, page: p2 } = await agentConnect(page as any).goto(
+    const { response, page: p2 } = await agentConnect(page as any, {
+      dynamicProxy: dyn,
+    }).goto(
       DATA_OK
     );
 
