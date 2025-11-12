@@ -278,6 +278,13 @@ export function agentConnect(
     onProxyLoaded,
   } = options ?? {};
 
+  if (!dynamicProxy) {
+    throw new AluviaError(
+      "No dynamic proxy supplied to agentConnect",
+      AluviaErrorCode.NoDynamicProxy
+    );
+  }
+
   const isRetryable = compileRetryable(retryOn);
 
   /** Prefer unpatched goto to avoid recursion */
@@ -339,13 +346,6 @@ export function agentConnect(
             );
           } else {
             await onProxyLoaded?.(proxy);
-          }
-
-          if (!dynamicProxy) {
-            throw new AluviaError(
-              "No dynamic proxy supplied to agentConnect",
-              AluviaErrorCode.NoDynamicProxy
-            );
           }
 
           // switch upstream & retry on same page without relaunch.
