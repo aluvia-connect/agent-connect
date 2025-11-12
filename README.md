@@ -1,6 +1,6 @@
 # Agent Connect
 
-[![npm version](https://badge.fury.io/js/@aluvia-connect/agent-connect.svg)](https://www.npmjs.com/package/@aluvia-connect/agent-connect)
+[![npm version](https://badge.fury.io/js/@aluvia-connect%2Fagent-connect.svg)](https://badge.fury.io/js/@aluvia-connect%2Fagent-connect)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org)
 
@@ -24,21 +24,38 @@ pnpm add @aluvia-connect/agent-connect
 
 ## Quick Start
 
-```typescript
+```ts
 import { chromium } from "playwright";
-import { retryWithProxy } from "@aluvia-connect/agent-connect";
+import { agentConnect, startDynamicProxy } from "@aluvia-connect/agent-connect";
 
-const browser = await chromium.launch();
+// Start local proxy-chain server (random free port)
+const dyn = await startDynamicProxy();
+
+// Launch browser using ONLY the local proxy initially (direct connection upstream)
+const browser = await chromium.launch({ proxy: { server: dyn.url } });
 const context = await browser.newContext();
 const page = await context.newPage();
 
-const { response, page: retriedPage } = await retryWithProxy(page).goto(
-  "https://blocked-website.com"
-);
+const { page: samePage } = await agentConnect(page, {
+  dynamicProxy: dyn,
+  maxRetries: 2,
+  retryOn: ["Timeout", /net::ERR/],
+  onProxyLoaded: (p) => console.log("Upstream proxy loaded", p.server),
+  onRetry: (a, m) => console.log(`Retry ${a}/${m}`),
+}).goto("https://blocked-website.example");
 
-console.log("Page title:", await retriedPage.title());
+console.log(await samePage.title());
 await browser.close();
 ```
+
+Notes:
+
+- The first attempt is direct (no upstream proxy). On failure, we fetch a proxy and call `dynamicProxy.setUpstream()` internally.
+- Subsequent retries reuse the same browser & page; cookies and session data persist.
+- Provide your own `proxyProvider` if you do not want to use the Aluvia API.
+- The dynamic proxy closes automatically when `browser.close()` is called. You can also call `dyn.close()` manually.
+
+You can integrate this with any proxy API or local pool, as long as it returns a `server`, `username`, and `password`.
 
 ## API Key Setup
 
@@ -52,15 +69,15 @@ ALUVIA_API_KEY=your_aluvia_api_key
 
 ## Configuration
 
-You can control how `retryWithProxy` behaves using environment variables or options passed in code.
+You can control how `agentConnect` behaves using environment variables or options passed in code.
 The environment variables set defaults globally, while the TypeScript options let you override them per call.
 
 ### Environment Variables
 
 | Variable             | Description                                                                              | Default                                 |
-| -------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------- |
+| -------------------- | ---------------------------------------------------------------------------------------- |-----------------------------------------|
 | `ALUVIA_API_KEY`     | Required unless you provide a custom `proxyProvider`. Used to fetch proxies from Aluvia. | _none_                                  |
-| `ALUVIA_MAX_RETRIES` | Number of retry attempts after the first failed navigation.                              | `1`                                     |
+| `ALUVIA_MAX_RETRIES` | Number of retry attempts after the first failed navigation.                              | `2`                                     |
 | `ALUVIA_BACKOFF_MS`  | Base delay (ms) between retries, grows exponentially with jitter.                        | `300`                                   |
 | `ALUVIA_RETRY_ON`    | Comma-separated list of retryable error substrings.                                      | `ECONNRESET,ETIMEDOUT,net::ERR,Timeout` |
 
@@ -68,23 +85,22 @@ The environment variables set defaults globally, while the TypeScript options le
 
 ```env
 ALUVIA_API_KEY=your_aluvia_api_key
-ALUVIA_MAX_RETRIES=2
+ALUVIA_MAX_RETRIES=1
 ALUVIA_BACKOFF_MS=500
 ALUVIA_RETRY_ON=ECONNRESET,ETIMEDOUT,net::ERR,Timeout
 ```
 
-### TypeScript Options
+### Options
 
-You can also configure behavior programmatically by passing options to `retryWithProxy()`.
+You can also configure behavior programmatically by passing options to `agentConnect()`.
 
 ```typescript
-import { retryWithProxy } from "@aluvia-connect/agent-connect";
+import { agentConnect } from "@aluvia-connect/agent-connect";
 
-const { response, page } = await retryWithProxy(page, {
+const { response, page } = await agentConnect(page, {
   maxRetries: 3,
   backoffMs: 500,
   retryOn: ["ECONNRESET", /403/],
-  closeOldBrowser: false,
   onRetry: (attempt, maxRetries, lastError) => {
     console.log(
       `Retry attempt ${attempt} of ${maxRetries} due to error:`,
@@ -100,11 +116,10 @@ const { response, page } = await retryWithProxy(page, {
 #### Available Options
 
 | Option            | Type                                                                                 | Default                                  | Description                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `maxRetries`      | `number`                                                                             | `process.env.ALUVIA_MAX_RETRIES` or `1`  | Number of retry attempts after the first failure.                                                             |
+| ----------------- | ------------------------------------------------------------------------------------ |------------------------------------------| ------------------------------------------------------------------------------------------------------------- |
+| `maxRetries`      | `number`                                                                             | `process.env.ALUVIA_MAX_RETRIES` or `2`  | Number of retry attempts after the first failure.                                                             |
 | `backoffMs`       | `number`                                                                             | `process.env.ALUVIA_BACKOFF_MS` or `300` | Base delay (in ms) between retries, grows exponentially with jitter.                                          |
 | `retryOn`         | `(string \| RegExp)[]`                                                               | `process.env.ALUVIA_RETRY_ON`            | Error patterns considered retryable.                                                                          |
-| `closeOldBrowser` | `boolean`                                                                            | `true`                                   | Whether to close the old browser when relaunching.                                                            |
 | `proxyProvider`   | `ProxyProvider`                                                                      | Uses Aluvia SDK                          | Custom proxy provider that returns proxy credentials.                                                         |
 | `onRetry`         | `(attempt: number, maxRetries: number, lastError: unknown) => void \| Promise<void>` | `undefined`                              | Callback invoked before each retry attempt.                                                                   |
 | `onProxyLoaded`   | `(proxy: ProxySettings) => void \| Promise<void>`                                    | `undefined`                              | Callback fired after a proxy has been successfully fetched (either from the Aluvia API or a custom provider). |
@@ -122,53 +137,11 @@ const myProxyProvider = {
   },
 };
 
-const { response, page } = await retryWithProxy(page, {
+const { response, page } = await agentConnect(page, {
   proxyProvider: myProxyProvider,
   maxRetries: 3,
 });
 ```
-
-## Dynamic Proxy (No Browser Relaunch)
-
-To avoid relaunching the browser for each retry you can run a local proxy that dynamically swaps its upstream. This keeps all pages, contexts and session state intact.
-
-1. Start the dynamic proxy.
-2. Launch Playwright pointing at its local address.
-3. Pass the dynamic proxy into `retryWithProxy`.
-4. On a retryable failure the upstream proxy is fetched and swapped; navigation is re-attempted on the same page instance.
-
-```ts
-import { chromium } from "playwright";
-import { retryWithProxy, startDynamicProxy } from "@aluvia-connect/agent-connect";
-
-// Start local proxy-chain server (random free port)
-const dyn = await startDynamicProxy();
-
-// Launch browser using ONLY the local proxy initially (direct connection upstream)
-const browser = await chromium.launch({ proxy: { server: dyn.url } });
-const context = await browser.newContext();
-const page = await context.newPage();
-
-const { page: samePage } = await retryWithProxy(page, {
-  dynamicProxy: dyn,
-  maxRetries: 2,
-  retryOn: ["Timeout", /net::ERR/],
-  onProxyLoaded: (p) => console.log("Upstream proxy loaded", p.server),
-  onRetry: (a, m) => console.log(`Dynamic retry ${a}/${m}`),
-}).goto("https://blocked-website.example");
-
-console.log(await samePage.title());
-await dyn.close();
-await browser.close();
-```
-
-Notes:
-
-- The first attempt is direct (no upstream proxy). On failure we fetch a proxy and call `dynamicProxy.setUpstream()` internally.
-- Subsequent retries reuse the same browser & page; cookies and session data persist.
-- Provide your own `proxyProvider` if you do not want to use the Aluvia API.
-
-You can integrate this with any proxy API or local pool, as long as it returns a `server`, `username`, and `password`.
 
 ## Requirements
 

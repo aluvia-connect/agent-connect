@@ -11,7 +11,7 @@
  *   ALUVIA_API_KEY=<API KEY> node examples/dynamic-proxy-retry.js
  */
 import { chromium } from 'playwright';
-import { retryWithProxy, startDynamicProxy } from '@aluvia-connect/agent-connect';
+import { agentConnect, startDynamicProxy } from '@aluvia-connect/agent-connect';
 
 // Retry on common timeout/network indicators.
 process.env.ALUVIA_RETRY_ON = 'Timeout,ETIMEDOUT,net::ERR';
@@ -26,7 +26,7 @@ async function main() {
 
   const UNROUTABLE_URL = 'http://10.255.255.1'; // TEST-NET-1 address likely to timeout
 
-  const runner = retryWithProxy(page, {
+  const runner = agentConnect(page, {
     dynamicProxy: dynamic,
     maxRetries: 2,
     backoffMs: 500,

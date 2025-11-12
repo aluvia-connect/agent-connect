@@ -1,8 +1,5 @@
 import type {
-  Browser,
-  BrowserContextOptions,
-  BrowserType,
-  LaunchOptions,
+  BrowserContext,
   Page,
   Response,
 } from "playwright";
@@ -10,7 +7,7 @@ import { Server as ProxyChainServer } from "proxy-chain";
 
 const DEFAULT_GOTO_TIMEOUT_MS = 15_000;
 
-const ENV_MAX_RETRIES = Math.max(0, parseInt(process.env.ALUVIA_MAX_RETRIES || "1", 10)); // prettier-ignore
+const ENV_MAX_RETRIES = Math.max(0, parseInt(process.env.ALUVIA_MAX_RETRIES || "2", 10)); // prettier-ignore
 const ENV_BACKOFF_MS  = Math.max(0, parseInt(process.env.ALUVIA_BACKOFF_MS  || "300", 10)); // prettier-ignore
 const ENV_RETRY_ON = (
   process.env.ALUVIA_RETRY_ON ?? "ECONNRESET,ETIMEDOUT,net::ERR,Timeout"
@@ -30,7 +27,7 @@ export type RetryPattern = string | RegExp;
 
 type GoToOptions = NonNullable<Parameters<Page["goto"]>[1]>;
 
-export interface RetryWithProxyRunner {
+export interface AgentConnectRunner {
   goto(
     url: string,
     options?: GoToOptions
@@ -53,6 +50,7 @@ enum AluviaErrorCode {
   ProxyFetchFailed = "ALUVIA_PROXY_FETCH_FAILED",
   InsufficientBalance = "ALUVIA_INSUFFICIENT_BALANCE",
   BalanceFetchFailed = "ALUVIA_BALANCE_FETCH_FAILED",
+  NoDynamicProxy = "ALUVIA_NO_DYNAMIC_PROXY",
 }
 
 export class AluviaError extends Error {
@@ -64,7 +62,16 @@ export class AluviaError extends Error {
   }
 }
 
-export interface RetryWithProxyOptions {
+export interface AgentConnectOptions {
+  /**
+   * Dynamic proxy. Retries will switch upstream proxy via this local proxy.
+   *
+   * To use: const dyn = await startDynamicProxy();
+   * chromium.launch({ proxy: { server: dyn.url } })
+   * Then pass { dynamicProxy: dyn } to agentConnect().
+   */
+  dynamicProxy: DynamicProxy;
+
   /**
    * Number of retry attempts after the first failed navigation.
    *
@@ -72,7 +79,7 @@ export interface RetryWithProxyOptions {
    * If it fails with a retryable error (as defined by `retryOn`),
    * the helper will fetch a new proxy and relaunch the browser.
    *
-   * @default process.env.ALUVIA_MAX_RETRIES || 1
+   * @default process.env.ALUVIA_MAX_RETRIES || 2
    * @example
    * // Try up to 3 proxy relaunches after the first failure
    * { maxRetries: 3 }
@@ -107,23 +114,9 @@ export interface RetryWithProxyOptions {
   retryOn?: RetryPattern[];
 
   /**
-   * Whether to close the old browser instance when relaunching with a new proxy.
-   *
-   * Set to `true` (default) to prevent multiple browsers from staying open,
-   * which is safer for most workflows. Set to `false` if you manage browser
-   * lifecycles manually or reuse a shared browser across tasks.
-   *
-   * @default true
-   * @example
-   * // Keep old browser open (you must close it yourself)
-   * { closeOldBrowser: false }
-   */
-  closeOldBrowser?: boolean;
-
-  /**
    * Optional custom proxy provider used to fetch proxy credentials.
    *
-   * By default, `retryWithProxy` automatically uses the Aluvia API
+   * By default, `agentConnect` automatically uses the Aluvia API
    * via the `aluvia-ts-sdk` and reads the API key from
    * `process.env.ALUVIA_API_KEY`.
    *
@@ -137,7 +130,7 @@ export interface RetryWithProxyOptions {
    * @default Uses the built-in Aluvia client with `process.env.ALUVIA_API_KEY`
    * @example
    * ```ts
-   * import { retryWithProxy } from "agent-connect";
+   * import { agentConnect } from "agent-connect";
    *
    * // Custom proxy provider example
    * const myProxyProvider = {
@@ -151,7 +144,7 @@ export interface RetryWithProxyOptions {
    *   },
    * };
    *
-   * const { response, page } = await retryWithProxy(page, {
+   * const { response, page } = await agentConnect(page, {
    *   proxyProvider: myProxyProvider,
    *   maxRetries: 3,
    * });
@@ -178,16 +171,6 @@ export interface RetryWithProxyOptions {
    * @param proxy The proxy settings that were fetched or provided
    */
   onProxyLoaded?: (proxy: ProxySettings) => void | Promise<void>;
-
-  /**
-   * Optional dynamic proxy. If provided, retries will switch upstream proxy
-   * via this local proxy instead of relaunching the browser.
-   *
-   * To use: const dyn = await startDynamicProxy();
-   * chromium.launch({ proxy: { server: dyn.url } })
-   * Then pass { dynamicProxy: dyn } to retryWithProxy().
-   */
-  dynamicProxy?: DynamicProxy;
 }
 
 let aluviaClient: any | undefined; // lazy-loaded Aluvia client instance
@@ -217,9 +200,11 @@ async function getAluviaProxy(): Promise<ProxySettings> {
     );
   }
 
+  const sessionId = generateSessionId();
+
   return {
     server: `http://${proxy.host}:${proxy.httpPort}`,
-    username: proxy.username,
+    username: `${proxy.username}-session-${sessionId}`,
     password: proxy.password,
   };
 }
@@ -272,74 +257,33 @@ function compileRetryable(
   };
 }
 
-function inferBrowserTypeFromPage(page: Page): BrowserType<Browser> {
-  const browser = page.context().browser();
-  const browserType = (browser as any)?.browserType?.();
-  if (!browserType) {
-    throw new Error("Cannot infer BrowserType from page");
-  }
-
-  return browserType as BrowserType<Browser>;
-}
-
-async function inferContextDefaults(
-  page: Page
-): Promise<BrowserContextOptions> {
-  const context = page.context();
-  const options = (context as any)._options as BrowserContextOptions;
-  return options ?? {};
-}
-
-function inferLaunchDefaults(page: Page): LaunchOptions {
-  const browser = page.context().browser();
-  const options = (browser as any)._options as LaunchOptions | undefined;
-  return options ?? {};
-}
-
-async function relaunchWithProxy(
-  proxy: ProxySettings,
-  oldPage: Page,
-  closeOldBrowser: boolean = true
-): Promise<{ page: Page }> {
-  const browserType = inferBrowserTypeFromPage(oldPage);
-  const launchDefaults = inferLaunchDefaults(oldPage);
-  const contextDefaults = await inferContextDefaults(oldPage);
-
-  if (closeOldBrowser) {
-    const oldBrowser = oldPage.context().browser();
-    try {
-      await oldBrowser?.close();
-    } catch {}
-  }
-
-  const retryLaunch: LaunchOptions = {
-    ...launchDefaults,
-    proxy,
-  };
-
-  const browser = await browserType.launch(retryLaunch);
-  const context = await browser.newContext(contextDefaults);
-
-  const page = await context.newPage();
-  return { page };
+function generateSessionId(): string {
+  return Math.random().toString(36).substring(2, 10);
 }
 
 const GOTO_ORIGINAL = Symbol.for("aluvia.gotoOriginal");
+const CONTEXT_LISTENER_ATTACHED = new WeakSet<BrowserContext>();
 
-export function retryWithProxy(
+export function agentConnect(
   page: Page,
-  options?: RetryWithProxyOptions
-): RetryWithProxyRunner {
+  options?: AgentConnectOptions
+): AgentConnectRunner {
   const {
+    dynamicProxy,
     maxRetries = ENV_MAX_RETRIES,
     backoffMs = ENV_BACKOFF_MS,
     retryOn = DEFAULT_RETRY_PATTERNS,
-    closeOldBrowser = true,
     proxyProvider,
     onRetry,
     onProxyLoaded,
-    dynamicProxy,
   } = options ?? {};
+
+  if (!dynamicProxy) {
+    throw new AluviaError(
+      "No dynamic proxy supplied to agentConnect",
+      AluviaErrorCode.NoDynamicProxy
+    );
+  }
 
   const isRetryable = compileRetryable(retryOn);
 
@@ -352,6 +296,15 @@ export function retryWithProxy(
       const run = async () => {
         let basePage: Page = page;
         let lastErr: unknown;
+
+        // One-time attach context close listener to shut down dynamic proxy
+        if (dynamicProxy) {
+          const ctx = basePage.context();
+          if (!CONTEXT_LISTENER_ATTACHED.has(ctx)) {
+            ctx.on('close', async () => { try { await dynamicProxy.close(); } catch {} });
+            CONTEXT_LISTENER_ATTACHED.add(ctx);
+          }
+        }
 
         // First attempt without proxy
         try {
@@ -378,106 +331,46 @@ export function retryWithProxy(
           }
         }
 
-        const proxy = await (proxyProvider?.get() ?? getAluviaProxy()).catch(
-          (err) => {
-            lastErr = err;
-            return undefined;
-          }
-        );
-
-        if (!proxy) {
-          throw new AluviaError(
-            "Failed to obtain a proxy for retry attempts. Check your balance and proxy pool at https://dashboard.aluvia.io/.",
-            AluviaErrorCode.ProxyFetchFailed
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          const proxy = await (proxyProvider?.get() ?? getAluviaProxy()).catch(
+            (err) => {
+              lastErr = err;
+              return undefined;
+            }
           );
-        } else {
-          await onProxyLoaded?.(proxy);
-        }
 
-        // If dynamic proxy supplied, switch upstream & retry on same page without relaunch.
-        if (dynamicProxy) {
+          if (!proxy) {
+            throw new AluviaError(
+              "Failed to obtain a proxy for retry attempts. Check your balance and proxy pool at https://dashboard.aluvia.io/.",
+              AluviaErrorCode.ProxyFetchFailed
+            );
+          } else {
+            await onProxyLoaded?.(proxy);
+          }
+
+          // switch upstream & retry on same page without relaunch.
           await dynamicProxy.setUpstream(proxy);
 
-          for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            if (backoffMs > 0) {
-              const delay = backoffDelay(backoffMs, attempt - 1);
-              await new Promise((r) => setTimeout(r, delay));
-            }
-            await onRetry?.(attempt, maxRetries, lastErr);
-            try {
-              const response = await getRawGoto(basePage)(url, {
-                ...(gotoOptions ?? {}),
-                timeout: gotoOptions?.timeout ?? DEFAULT_GOTO_TIMEOUT_MS,
-                waitUntil: gotoOptions?.waitUntil ?? "domcontentloaded",
-              });
-              return { response: response ?? null, page: basePage };
-            } catch (err) {
-              lastErr = err;
-              if (!isRetryable(err)) break; // stop early on non-retryable error
-              continue; // next attempt
-            }
-          }
-
-          if (lastErr instanceof Error) throw lastErr;
-          throw new Error(lastErr ? String(lastErr) : "Navigation failed");
-        }
-
-        // Original relaunch path if no dynamic proxy provided
-        // Retries with proxy
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
           if (backoffMs > 0) {
             const delay = backoffDelay(backoffMs, attempt - 1);
-            await new Promise((resolve) => setTimeout(resolve, delay));
+            await new Promise((r) => setTimeout(r, delay));
           }
-
           await onRetry?.(attempt, maxRetries, lastErr);
-
           try {
-            const { page: newPage } = await relaunchWithProxy(
-              proxy,
-              basePage,
-              closeOldBrowser
-            );
-
-            try {
-              const response = await getRawGoto(newPage)(url, {
-                ...(gotoOptions ?? {}),
-                timeout: gotoOptions?.timeout ?? DEFAULT_GOTO_TIMEOUT_MS,
-                waitUntil: gotoOptions?.waitUntil ?? "domcontentloaded",
-              });
-
-              // non-fatal readiness gate
-              try {
-                await newPage.waitForFunction(
-                  () =>
-                    typeof document !== "undefined" && !!document.title?.trim(),
-                  { timeout: DEFAULT_GOTO_TIMEOUT_MS }
-                );
-              } catch {}
-
-              return {
-                response: response ?? null,
-                page: newPage,
-              };
-            } catch (err) {
-              // navigation on the new page failed — carry this page forward
-              basePage = newPage;
-              lastErr = err;
-
-              // next loop iteration will close this browser (since we pass basePage)
-              continue;
-            }
+            const response = await getRawGoto(basePage)(url, {
+              ...(gotoOptions ?? {}),
+              timeout: gotoOptions?.timeout ?? DEFAULT_GOTO_TIMEOUT_MS,
+              waitUntil: gotoOptions?.waitUntil ?? "domcontentloaded",
+            });
+            return { response: response ?? null, page: basePage };
           } catch (err) {
-            // relaunch itself failed (no new page created)
             lastErr = err;
-            continue;
+            if (!isRetryable(err)) break; // stop early on non-retryable error
+            continue; // next attempt
           }
         }
 
-        if (lastErr instanceof Error) {
-          throw lastErr;
-        }
-
+        if (lastErr instanceof Error) throw lastErr;
         throw new Error(lastErr ? String(lastErr) : "Navigation failed");
       };
 

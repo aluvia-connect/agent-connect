@@ -101,11 +101,11 @@ jobs:
             ## Installation
 
             ```bash
-            npm install page-retry@${{ github.ref_name }}
+            npm install @aluvia-connect/agent-connect@${{ github.ref_name }}
             ```
 
             ## Documentation
 
-            Visit our [GitHub repository](https://github.com/xtrella/page-retry) for complete documentation and examples.
+            Visit our [GitHub repository](https://github.com/aluvia-connect/agent-connect) for complete documentation and examples.
           draft: false
           prerelease: false
