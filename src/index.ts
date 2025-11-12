@@ -294,7 +294,7 @@ export function agentConnect(
         if (dynamicProxy) {
           const ctx = basePage.context();
           if (!CONTEXT_LISTENER_ATTACHED.has(ctx)) {
-            ctx.on('close', () => { try { dynamicProxy.close(); } catch {} });
+            ctx.on('close', async () => { try { await dynamicProxy.close(); } catch {} });
             CONTEXT_LISTENER_ATTACHED.add(ctx);
           }
         }
