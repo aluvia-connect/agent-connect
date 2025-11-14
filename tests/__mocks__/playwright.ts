@@ -7,14 +7,33 @@ export class FakePage {
   private _title = "ok";
   private _gotoImpl: GotoFn;
   private _ctx: FakeContext;
+  private _events: Record<string, Function[]> = {};
+  private _lastUrl: string | undefined;
+  private _reloadImpl: (opts?: any) => Promise<any> = async (opts?: any) => {
+    if (!this._lastUrl) return null;
+    return this._gotoImpl(this._lastUrl, opts);
+  };
 
   constructor(ctx: FakeContext, gotoImpl?: GotoFn) {
     this._ctx = ctx;
     this._gotoImpl = gotoImpl ?? (async () => null); // mimic data: URL -> null Response
   }
 
+  on(event: string, cb: Function) {
+    (this._events[event] ||= []).push(cb);
+  }
+
   async goto(url: string, opts?: any) {
+    this._lastUrl = url;
     return this._gotoImpl(url, opts);
+  }
+
+  async reload(opts?: any) {
+    return this._reloadImpl(opts);
+  }
+
+  __setReload(fn: (opts?: any) => Promise<any>) {
+    this._reloadImpl = fn;
   }
 
   async title() {
@@ -31,6 +50,24 @@ export class FakePage {
   __setGoto(fn: GotoFn) {
     this._gotoImpl = fn;
   }
+
+  /** Test helper: simulate a requestfailed event */
+  __emitRequestFailed(
+    errorText: string,
+    url: string = this._lastUrl || "http://example.com",
+    resourceType: string = "document"
+  ) {
+    const req = {
+      url: () => url,
+      resourceType: () => resourceType,
+      failure: () => ({ errorText }),
+    };
+    (this._events["requestfailed"] || []).forEach((fn) => {
+      try {
+        fn(req);
+      } catch {}
+    });
+  }
 }
 
 export class FakeContext {
@@ -45,6 +82,12 @@ export class FakeContext {
   async newPage() {
     const p = new FakePage(this);
     this._pages.push(p);
+    // Emit 'page' event to listeners
+    (this._events["page"] || []).forEach((fn) => {
+      try {
+        fn(p);
+      } catch {}
+    });
     return p;
   }
 

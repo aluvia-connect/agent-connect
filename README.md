@@ -22,7 +22,7 @@ yarn add @aluvia-connect/agent-connect
 pnpm add @aluvia-connect/agent-connect
 ```
 
-## Quick Start
+## Quick Start (Goto Wrapper)
 
 ```ts
 import { chromium } from "playwright";
@@ -53,9 +53,75 @@ Notes:
 - The first attempt is direct (no upstream proxy). On failure, we fetch a proxy and call `dynamicProxy.setUpstream()` internally.
 - Subsequent retries reuse the same browser & page; cookies and session data persist.
 - Provide your own `proxyProvider` if you do not want to use the Aluvia API.
-- The dynamic proxy closes automatically when `browser.close()` is called. You can also call `dyn.close()` manually.
+- The dynamic proxy closes automatically when the Playwright `BrowserContext` closes (also when `browser.close()` cascades). You can call `dyn.close()` manually too.
 
 You can integrate this with any proxy API or local pool, as long as it returns a `server`, `username`, and `password`.
+
+## Event-Driven Retry (EventRunner)
+
+If you prefer not to wrap `page.goto()` and instead automatically react to failed network/navigation requests, use the event-based runner.
+
+`EventRunner` listens to Playwright events on a `BrowserContext` and triggers retries when a page emits a `requestfailed` event for a navigation/document request whose failure text matches your retry patterns.
+
+### When to Use
+- Use `agentConnectEvents()` when you want passive, centralized retry handling for all pages in a context without changing existing code that calls `page.goto()`.
+- Use `agentConnect()` when you want explicit control per navigation call and structured results (`{ response, page }`).
+
+### What It Does
+- Tracks every page opened in the context (`runner.getTrackedPages()`).
+- On `requestfailed` for a `document` / main-frame resource (navigation failure), checks error text against your `retryOn` patterns.
+- Rotates upstream proxy via the dynamic proxy and performs a `page.reload()` (fallback to `page.goto(lastUrl)`) with exponential backoff and jitter until success or max retries reached.
+- Automatically closes the dynamic proxy when the context closes.
+- Prevents concurrent overlapping retries per page.
+
+### Usage
+
+```ts
+import { chromium } from 'playwright';
+import { startDynamicProxy, agentConnectEvents } from '@aluvia-connect/agent-connect';
+
+const dyn = await startDynamicProxy();
+const browser = await chromium.launch({ proxy: { server: dyn.url } });
+const context = await browser.newContext();
+
+// Attach event-driven retry logic
+const runner = agentConnectEvents(context, {
+  dynamicProxy: dyn,
+  maxRetries: 3,
+  backoffMs: 250,
+  retryOn: ['Timeout', /ECONNRESET/, /net::ERR/],
+  onRetry: (attempt, max, last) => {
+    console.log(`(events) retry ${attempt}/${max}`, last);
+  },
+  onProxyLoaded: (proxy) => console.log('Loaded upstream', proxy.server),
+});
+
+const page = await context.newPage();
+await page.goto('https://example.com'); // normal usage
+// If the navigation or subsequent document request fails and matches patterns, EventRunner will retry automatically.
+
+// Access tracked pages if needed:
+console.log('Tracked pages:', runner.getTrackedPages().length);
+
+await browser.close(); // dynamic proxy auto-closed
+```
+
+### API: `agentConnectEvents(context, options)`
+Accepts the same option names as `agentConnect`, plus:
+- `dynamicProxy` (required): The dynamic proxy returned by `startDynamicProxy()`.
+
+Returns an `EventRunner` instance with:
+- `getTrackedPages(): Page[]` – snapshot of pages seen so far.
+
+### Retry Semantics
+- Only retries failures where `request.resourceType()` is one of: `document`, `frame`, `main_frame`.
+- Matching is performed against the failure's `errorText` plus any error properties message/code/name if present.
+- Exponential backoff formula: `backoffMs * 2^attempt + random(0–100)` (same as the goto wrapper).
+
+### Limitations
+- Does not capture low-level socket errors that never surface as `requestfailed` events.
+- Non-navigation requests (e.g. images, scripts) are ignored to avoid excessive reload loops.
+- Assumes the last attempted URL is still valid for `reload()`; falls back to `goto(url)` if `reload` is not available.
 
 ## API Key Setup
 
@@ -69,7 +135,7 @@ ALUVIA_API_KEY=your_aluvia_api_key
 
 ## Configuration
 
-You can control how `agentConnect` behaves using environment variables or options passed in code.
+You can control how `agentConnect` and `agentConnectEvents` behave using environment variables or options passed in code.
 The environment variables set defaults globally, while the TypeScript options let you override them per call.
 
 ### Environment Variables
@@ -92,7 +158,7 @@ ALUVIA_RETRY_ON=ECONNRESET,ETIMEDOUT,net::ERR,Timeout
 
 ### Options
 
-You can also configure behavior programmatically by passing options to `agentConnect()`.
+You can also configure behavior programmatically by passing options to `agentConnect()` or `agentConnectEvents()`.
 
 ```typescript
 import { agentConnect } from "@aluvia-connect/agent-connect";
@@ -119,10 +185,10 @@ const { response, page } = await agentConnect(page, {
 | ----------------- | ------------------------------------------------------------------------------------ |------------------------------------------| ------------------------------------------------------------------------------------------------------------- |
 | `maxRetries`      | `number`                                                                             | `process.env.ALUVIA_MAX_RETRIES` or `2`  | Number of retry attempts after the first failure.                                                             |
 | `backoffMs`       | `number`                                                                             | `process.env.ALUVIA_BACKOFF_MS` or `300` | Base delay (in ms) between retries, grows exponentially with jitter.                                          |
-| `retryOn`         | `(string \| RegExp)[]`                                                               | `process.env.ALUVIA_RETRY_ON`            | Error patterns considered retryable.                                                                          |
+| `retryOn`         | `(string | RegExp)[]`                                                               | `process.env.ALUVIA_RETRY_ON`            | Error patterns considered retryable.                                                                          |
 | `proxyProvider`   | `ProxyProvider`                                                                      | Uses Aluvia SDK                          | Custom proxy provider that returns proxy credentials.                                                         |
-| `onRetry`         | `(attempt: number, maxRetries: number, lastError: unknown) => void \| Promise<void>` | `undefined`                              | Callback invoked before each retry attempt.                                                                   |
-| `onProxyLoaded`   | `(proxy: ProxySettings) => void \| Promise<void>`                                    | `undefined`                              | Callback fired after a proxy has been successfully fetched (either from the Aluvia API or a custom provider). |
+| `onRetry`         | `(attempt: number, maxRetries: number, lastError: unknown) => void | Promise<void>` | `undefined`                              | Callback invoked before each retry attempt.                                                                   |
+| `onProxyLoaded`   | `(proxy: ProxySettings) => void | Promise<void>`                                    | `undefined`                              | Callback fired after a proxy has been successfully fetched.                                                   |
 
 #### Custom Proxy Provider Example
 
