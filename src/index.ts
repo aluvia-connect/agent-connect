@@ -1,11 +1,6 @@
-import type {
-  BrowserContext,
-  Page,
-  Response,
-} from "playwright";
+import type { Page, Response } from "playwright";
 import { Server as ProxyChainServer } from "proxy-chain";
-
-const DEFAULT_GOTO_TIMEOUT_MS = 15_000;
+import { GotoRunner } from "./goto-runner";
 
 const ENV_MAX_RETRIES = Math.max(0, parseInt(process.env.ALUVIA_MAX_RETRIES || "2", 10)); // prettier-ignore
 const ENV_BACKOFF_MS  = Math.max(0, parseInt(process.env.ALUVIA_BACKOFF_MS  || "300", 10)); // prettier-ignore
@@ -235,34 +230,9 @@ async function getAluviaBalance() {
   return data.data.balance_gb;
 }
 
-function backoffDelay(base: number, attempt: number) {
-  // exponential + jitter
-  const jitter = Math.random() * 100;
-  return base * Math.pow(2, attempt) + jitter;
-}
-
-function compileRetryable(
-  patterns: (string | RegExp)[] = DEFAULT_RETRY_PATTERNS
-): (err: unknown) => boolean {
-  return (err: unknown) => {
-    if (!err) return false;
-    const msg = String((err as any)?.message ?? (err as any) ?? "");
-    const code = String((err as any)?.code ?? "");
-    const name = String((err as any)?.name ?? "");
-    return patterns.some((p) =>
-      p instanceof RegExp
-        ? p.test(msg) || p.test(code) || p.test(name)
-        : msg.includes(p) || code.includes(p) || name.includes(p)
-    );
-  };
-}
-
 function generateSessionId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
-
-const GOTO_ORIGINAL = Symbol.for("aluvia.gotoOriginal");
-const CONTEXT_LISTENER_ATTACHED = new WeakSet<BrowserContext>();
 
 export function agentConnect(
   page: Page,
@@ -285,96 +255,22 @@ export function agentConnect(
     );
   }
 
-  const isRetryable = compileRetryable(retryOn);
-
-  /** Prefer unpatched goto to avoid recursion */
-  const getRawGoto = (p: Page) =>
-    ((p as any)[GOTO_ORIGINAL]?.bind(p) ?? p.goto.bind(p)) as Page["goto"];
-
   return {
     async goto(url: string, gotoOptions?: GoToOptions) {
-      const run = async () => {
-        let basePage: Page = page;
-        let lastErr: unknown;
-
-        // One-time attach context close listener to shut down dynamic proxy
-        if (dynamicProxy) {
-          const ctx = basePage.context();
-          if (!CONTEXT_LISTENER_ATTACHED.has(ctx)) {
-            ctx.on('close', async () => { try { await dynamicProxy.close(); } catch {} });
-            CONTEXT_LISTENER_ATTACHED.add(ctx);
-          }
-        }
-
-        // First attempt without proxy
-        try {
-          const response = await getRawGoto(basePage)(url, {
-            ...(gotoOptions ?? {}),
-            timeout: gotoOptions?.timeout ?? DEFAULT_GOTO_TIMEOUT_MS,
-            waitUntil: gotoOptions?.waitUntil ?? "domcontentloaded",
-          });
-          return { response: response ?? null, page: basePage };
-        } catch (err) {
-          lastErr = err;
-          if (!isRetryable(err)) {
-            throw err;
-          }
-        }
-
-        if (!proxyProvider) {
-          const balance = await getAluviaBalance().catch(() => null);
-          if (balance !== null && balance <= 0) {
-            throw new AluviaError(
-              "Your Aluvia account has no remaining balance. Please top up at https://dashboard.aluvia.io/ to continue using proxies.",
-              AluviaErrorCode.InsufficientBalance
-            );
-          }
-        }
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          const proxy = await (proxyProvider?.get() ?? getAluviaProxy()).catch(
-            (err) => {
-              lastErr = err;
-              return undefined;
-            }
-          );
-
-          if (!proxy) {
-            throw new AluviaError(
-              "Failed to obtain a proxy for retry attempts. Check your balance and proxy pool at https://dashboard.aluvia.io/.",
-              AluviaErrorCode.ProxyFetchFailed
-            );
-          } else {
-            await onProxyLoaded?.(proxy);
-          }
-
-          // switch upstream & retry on same page without relaunch.
-          await dynamicProxy.setUpstream(proxy);
-
-          if (backoffMs > 0) {
-            const delay = backoffDelay(backoffMs, attempt - 1);
-            await new Promise((r) => setTimeout(r, delay));
-          }
-          await onRetry?.(attempt, maxRetries, lastErr);
-          try {
-            const response = await getRawGoto(basePage)(url, {
-              ...(gotoOptions ?? {}),
-              timeout: gotoOptions?.timeout ?? DEFAULT_GOTO_TIMEOUT_MS,
-              waitUntil: gotoOptions?.waitUntil ?? "domcontentloaded",
-            });
-            return { response: response ?? null, page: basePage };
-          } catch (err) {
-            lastErr = err;
-            if (!isRetryable(err)) break; // stop early on non-retryable error
-            continue; // next attempt
-          }
-        }
-
-        if (lastErr instanceof Error) throw lastErr;
-        throw new Error(lastErr ? String(lastErr) : "Navigation failed");
-      };
-
-      return run();
+      const runner = new GotoRunner({
+        dynamicProxy,
+        page,
+        maxRetries,
+        backoffMs,
+        retryOn,
+        proxyProvider,
+        onRetry,
+        onProxyLoaded,
+        getAluviaProxy,
+        AluviaErrorCtor: AluviaError,
+        AluviaErrorCode,
+      });
+      return runner.goto(url, gotoOptions);
     },
   };
 }
