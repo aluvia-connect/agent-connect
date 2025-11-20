@@ -40,7 +40,7 @@ describe("agentConnect (mocked Playwright)", () => {
   let page: FakePage;
 
   beforeEach(async () => {
-    process.env.ALUVIA_API_KEY = "TEST";
+    process.env.ALUVIA_TOKEN = "TEST";
     process.env.ALUVIA_RETRY_ON = "ETIMEDOUT,Timeout,net::ERR";
 
     // Each relaunch in SDK will get a new fake browser

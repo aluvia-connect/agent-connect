@@ -57,14 +57,14 @@ Notes:
 
 You can integrate this with any proxy API or local pool, as long as it returns a `server`, `username`, and `password`.
 
-## API Key Setup
+## Aluvia Token Setup
 
-This SDK uses an Aluvia API key to fetch proxies when retries occur.
-Get your key from your Aluvia account's [Dev Tools page](https://dashboard.aluvia.io/tools)
-and set it in .env:
+This SDK uses an Aluvia token to fetch proxies when retries occur. You can find your token on your Aluvia account's [credentials](https://dashboard.aluvia.io/credentials) page.
 
-```bash
-ALUVIA_API_KEY=your_aluvia_api_key
+Set your token key in a `.env` file:
+
+```env
+ALUVIA_TOKEN=your_aluvia_token
 ```
 
 ## Configuration
@@ -75,8 +75,8 @@ The environment variables set defaults globally, while the TypeScript options le
 ### Environment Variables
 
 | Variable             | Description                                                                              | Default                                 |
-| -------------------- | ---------------------------------------------------------------------------------------- |-----------------------------------------|
-| `ALUVIA_API_KEY`     | Required unless you provide a custom `proxyProvider`. Used to fetch proxies from Aluvia. | _none_                                  |
+|----------------------| ---------------------------------------------------------------------------------------- |-----------------------------------------|
+| `ALUVIA_TOKEN`       | Required unless you provide a custom `proxyProvider`. Used to fetch proxies from Aluvia. | _none_                                  |
 | `ALUVIA_MAX_RETRIES` | Number of retry attempts after the first failed navigation.                              | `2`                                     |
 | `ALUVIA_BACKOFF_MS`  | Base delay (ms) between retries, grows exponentially with jitter.                        | `300`                                   |
 | `ALUVIA_RETRY_ON`    | Comma-separated list of retryable error substrings.                                      | `ECONNRESET,ETIMEDOUT,net::ERR,Timeout` |
@@ -84,7 +84,7 @@ The environment variables set defaults globally, while the TypeScript options le
 #### Example `.env`
 
 ```env
-ALUVIA_API_KEY=your_aluvia_api_key
+ALUVIA_TOKEN=your_aluvia_token
 ALUVIA_MAX_RETRIES=1
 ALUVIA_BACKOFF_MS=500
 ALUVIA_RETRY_ON=ECONNRESET,ETIMEDOUT,net::ERR,Timeout
@@ -147,7 +147,7 @@ const { response, page } = await agentConnect(page, {
 
 - Node.js >= 18
 - Playwright
-- Aluvia API key (_if not using a custom proxy provider_)
+- Aluvia token (_if not using a custom proxy provider_)
 
 ## About Aluvia
 

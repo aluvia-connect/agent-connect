@@ -26,7 +26,7 @@ jobs:
         node: [18, 20]
 
     env:
-      ALUVIA_API_KEY: "test_key"
+      ALUVIA_TOKEN: "test_key"
       ALUVIA_MAX_RETRIES: "1"
       ALUVIA_BACKOFF_MS: "50"
       ALUVIA_RETRY_ON: "ETIMEDOUT,net::ERR"
