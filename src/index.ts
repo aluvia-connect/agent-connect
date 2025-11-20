@@ -118,7 +118,7 @@ export interface AgentConnectOptions {
    *
    * By default, `agentConnect` automatically uses the Aluvia API
    * via the `aluvia-ts-sdk` and reads the API key from
-   * `process.env.ALUVIA_API_KEY`.
+   * `process.env.ALUVIA_TOKEN`.
    *
    * Supplying your own `proxyProvider` allows you to integrate with
    * any proxy rotation service, database, or in-house pool instead.
@@ -127,7 +127,7 @@ export interface AgentConnectOptions {
    * `Promise<ProxySettings>` object with `server`, and optionally
    * `username` and `password` fields.
    *
-   * @default Uses the built-in Aluvia client with `process.env.ALUVIA_API_KEY`
+   * @default Uses the built-in Aluvia client with `process.env.ALUVIA_TOKEN`
    * @example
    * ```ts
    * import { agentConnect } from "agent-connect";
@@ -176,10 +176,10 @@ export interface AgentConnectOptions {
 let aluviaClient: any | undefined; // lazy-loaded Aluvia client instance
 
 async function getAluviaProxy(): Promise<ProxySettings> {
-  const apiKey = process.env.ALUVIA_API_KEY || "";
+  const apiKey = process.env.ALUVIA_TOKEN || "";
   if (!apiKey) {
     throw new AluviaError(
-      "Missing ALUVIA_API_KEY environment variable.",
+      "Missing ALUVIA_TOKEN environment variable.",
       AluviaErrorCode.NoApiKey
     );
   }
@@ -210,10 +210,10 @@ async function getAluviaProxy(): Promise<ProxySettings> {
 }
 
 async function getAluviaBalance() {
-  const apiKey = process.env.ALUVIA_API_KEY || "";
+  const apiKey = process.env.ALUVIA_TOKEN || "";
   if (!apiKey) {
     throw new AluviaError(
-      "Missing ALUVIA_API_KEY environment variable.",
+      "Missing ALUVIA_TOKEN environment variable.",
       AluviaErrorCode.NoApiKey
     );
   }

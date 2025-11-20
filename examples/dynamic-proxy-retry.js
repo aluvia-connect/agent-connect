@@ -8,7 +8,7 @@
  * Usage (from repo root):
  *   npm install
  *   npx playwright install
- *   ALUVIA_API_KEY=<API KEY> node examples/dynamic-proxy-retry.js
+ *   ALUVIA_TOKEN=<API KEY> node examples/dynamic-proxy-retry.js
  */
 import { chromium } from 'playwright';
 import { agentConnect, startDynamicProxy } from '@aluvia-connect/agent-connect';
