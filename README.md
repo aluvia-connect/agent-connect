@@ -209,6 +209,42 @@ const { response, page } = await agentConnect(page, {
 });
 ```
 
+## Examples
+
+### Wikipedia Random Article (EventRunner)
+Event-driven retry usage to scrape a random Wikipedia article without wrapping `page.goto()`. Automatically reloads on navigation/network failures matching retry patterns.
+
+JavaScript:
+```
+node examples/wikipedia-random-events.js
+```
+TypeScript:
+```
+ts-node examples/wikipediaRandomScrape.ts
+```
+(Or compile with `tsc` first.)
+
+Output includes article title, first paragraph and headings. Adjust `retryOn`, `maxRetries`, or provide a custom `proxyProvider` as needed.
+
+### Running Examples Locally
+Before running examples that import the published entry (`@aluvia-connect/agent-connect`), build the project:
+
+```bash
+npm install
+npm run build
+npx playwright install chromium
+```
+
+Run headless (default):
+```bash
+node examples/wikipedia-random-events.js
+```
+
+Run with UI (set HEADLESS=false):
+```bash
+HEADLESS=false node examples/wikipedia-random-events.js
+```
+
 ## Requirements
 
 - Node.js >= 18

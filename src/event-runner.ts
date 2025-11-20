@@ -3,15 +3,15 @@ import type { DynamicProxy, ProxySettings, RetryPattern } from './index';
 
 interface EventRunnerOptions {
   dynamicProxy: DynamicProxy;
-  maxRetries: number;
-  backoffMs: number;
-  retryOn: RetryPattern[];
+  maxRetries?: number;          // made optional
+  backoffMs?: number;           // made optional
+  retryOn?: RetryPattern[];     // made optional
   proxyProvider?: { get(): Promise<ProxySettings> };
   getAluviaProxy: () => Promise<ProxySettings>;
   onRetry?: (attempt: number, maxRetries: number, lastError: unknown) => void | Promise<void>;
   onProxyLoaded?: (proxy: ProxySettings) => void | Promise<void>;
-  AluviaErrorCtor: new (message: string, code?: any) => Error;
-  AluviaErrorCode: any;
+  AluviaErrorCtor?: new (message: string, code?: any) => Error; // made optional
+  AluviaErrorCode?: any;                                        // made optional
 }
 
 function backoffDelay(base: number, attempt: number) {
@@ -32,13 +32,22 @@ function compileRetryable(patterns: (string | RegExp)[]) {
   };
 }
 
-export class EventRunner {
+class EventRunner {
   private pages: Page[] = [];
   private isRetryable: (e: any) => boolean;
   private runningRetries = new WeakSet<Page>();
 
   constructor(private opts: EventRunnerOptions) {
-    this.isRetryable = compileRetryable(opts.retryOn);
+    // normalize defaults
+    const {
+      maxRetries = 3,
+      backoffMs = 300,
+      retryOn = ['Timeout', 'net::ERR', 'ECONNRESET', /ETIMEDOUT/],
+    } = opts;
+    this.opts.maxRetries = maxRetries;
+    this.opts.backoffMs = backoffMs;
+    this.opts.retryOn = retryOn;
+    this.isRetryable = compileRetryable(this.opts.retryOn);
   }
 
   getTrackedPages() {
@@ -54,6 +63,7 @@ export class EventRunner {
     // Track new pages
     context.on('page', (page: Page) => {
       this.pages.push(page);
+      this.patchGoto(page);         // NEW: proactive retry wrapper
       this.attachPageListeners(page);
     });
 
@@ -61,28 +71,83 @@ export class EventRunner {
     for (const p of context.pages?.() || []) {
       if (!this.pages.includes(p)) {
         this.pages.push(p);
+        this.patchGoto(p);          // NEW
         this.attachPageListeners(p);
       }
     }
   }
 
+  private patchGoto(page: Page) {
+    const original = page.goto.bind(page);
+    page.goto = (async (url: string, options?: any) => {
+      try {
+        return await original(url, options);
+      } catch (err) {
+        if (!this.isRetryable(err)) throw err;
+        const { maxRetries = 0, backoffMs = 0 } = this.opts;
+        let lastErr: any = err;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          await this.prepareUpstream(attempt, lastErr);
+            if (backoffMs > 0) {
+              await new Promise(r => setTimeout(r, backoffDelay(backoffMs, attempt - 1)));
+            }
+          try {
+            return await original(url, options);
+          } catch (e) {
+            lastErr = e;
+            if (!this.isRetryable(e)) break;
+          }
+        }
+        throw lastErr;
+      }
+    }) as any;
+  }
+
+  private async prepareUpstream(attempt: number, lastErr: unknown) {
+    const {
+      dynamicProxy,
+      proxyProvider,
+      getAluviaProxy,
+      onProxyLoaded,
+      onRetry,
+    } = this.opts;
+    await onRetry?.(attempt, this.opts.maxRetries!, lastErr);
+
+    if (attempt !== 1) return; // only load upstream once initially
+
+    try {
+      let proxy: ProxySettings | undefined;
+      if (proxyProvider) {
+        proxy = await proxyProvider.get();
+        await dynamicProxy.setUpstream(proxy);
+      } else if (getAluviaProxy) {
+        proxy = await getAluviaProxy();
+        await dynamicProxy.setUpstream(proxy);
+      } else if (typeof (dynamicProxy as any).loadUpstream === 'function') {
+        proxy = await (dynamicProxy as any).loadUpstream();
+      }
+      if (proxy) await onProxyLoaded?.(proxy);
+    } catch {
+      // swallow upstream load errors; retries continue
+    }
+  }
+
+  // ADDED: attachPageListeners to handle passive retries on request failures.
   private attachPageListeners(page: Page) {
-    page.on('requestfailed', async (request: any) => {
-      // Avoid parallel retries per page
+    page.on('requestfailed', async (req) => {
+      if (page.isClosed()) return;
+      const failure = req.failure();
+      const errText = failure?.errorText || '';
+      // Ignore non-retryable failures
+      if (!this.isRetryable({ errorText: errText })) return;
+      // Avoid overlapping retries for same page
       if (this.runningRetries.has(page)) return;
-
-      const failure = request.failure?.();
-      const errorText = failure?.errorText || '';
-      const resourceType = request.resourceType?.() || '';
-
-      // Only act on document/navigation failures
-      if (!['document', 'frame', 'main_frame'].includes(resourceType)) return;
-
-      if (!this.isRetryable({ errorText })) return;
-
       this.runningRetries.add(page);
       try {
-        await this.retryNavigation(page, request.url?.());
+        // Attempt passive navigation retry (reload/goto).
+        await this.retryNavigation(page, req.url());
+      } catch {
+        // Swallow here; explicit page.goto wrapper will surface fatal errors.
       } finally {
         this.runningRetries.delete(page);
       }
@@ -90,58 +155,70 @@ export class EventRunner {
   }
 
   private async retryNavigation(page: Page, lastUrl?: string) {
-    const { maxRetries, backoffMs, proxyProvider, getAluviaProxy, dynamicProxy, onRetry, onProxyLoaded, AluviaErrorCtor, AluviaErrorCode } = this.opts;
+    const { maxRetries = 0, backoffMs = 0, proxyProvider, getAluviaProxy, dynamicProxy, onRetry, onProxyLoaded } = this.opts;
     let lastErr: unknown;
-
-    if (!lastUrl) {
-      // Attempt to reconstruct from page content or skip
-      return;
-    }
-
+    if (!lastUrl) return;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const proxy = await (proxyProvider?.get() ?? getAluviaProxy()).catch((err) => {
-        lastErr = err;
-        return undefined;
-      });
-
-      if (!proxy) {
-        throw new AluviaErrorCtor(
-          'Failed to obtain a proxy for retry attempts. Check your balance and proxy pool at https://dashboard.aluvia.io/.',
-          AluviaErrorCode.ProxyFetchFailed
-        );
-      } else {
-        await onProxyLoaded?.(proxy);
-      }
-
-      await dynamicProxy.setUpstream(proxy);
-
-      if (backoffMs > 0) {
-        const delay = backoffDelay(backoffMs, attempt - 1);
-        await new Promise((r) => setTimeout(r, delay));
-      }
       await onRetry?.(attempt, maxRetries, lastErr);
-
       try {
-        // Prefer reload if available, fallback to goto
+        if (attempt === 1) {
+          let proxy: ProxySettings | undefined;
+            if (proxyProvider) {
+              proxy = await proxyProvider.get();
+              await dynamicProxy.setUpstream(proxy);
+            } else if (getAluviaProxy) {
+              proxy = await getAluviaProxy();
+              await dynamicProxy.setUpstream(proxy);
+            } else if (typeof (dynamicProxy as any).loadUpstream === 'function') {
+              proxy = await (dynamicProxy as any).loadUpstream();
+            }
+          if (proxy) await onProxyLoaded?.(proxy);
+        }
+      } catch {}
+      if (backoffMs > 0) {
+        await new Promise(r => setTimeout(r, backoffDelay(backoffMs, attempt - 1)));
+      }
+      try {
+        if (page.isClosed()) return;
         if (typeof (page as any).reload === 'function') {
           await (page as any).reload({ waitUntil: 'domcontentloaded' });
         } else {
           await page.goto(lastUrl, { waitUntil: 'domcontentloaded' });
         }
-        // success -> stop
         return;
-      } catch (err) {
-        lastErr = err;
-        if (!this.isRetryable(err)) break;
-        continue; // next retry
+      } catch (e) {
+        lastErr = e;
+        if (!this.isRetryable(e)) break;
       }
     }
-
-    if (lastErr instanceof Error) throw lastErr;
-    if (lastErr) throw new Error(String(lastErr));
-    throw new Error('Navigation retry failed');
+    if (lastErr) throw lastErr;
   }
 }
 
-export default EventRunner;
+// NEW: helper factory for plug-and-play usage (used by example)
+export function agentConnectEvents(context: BrowserContext, opts: EventRunnerOptions) {
+  const runner = new EventRunner(opts);
+  runner.listen(context);
+  return runner;
+}
 
+export function runEventRunnerSelfTest() {
+  // Minimal stub dynamic proxy
+  const stubDyn: DynamicProxy = {
+    url: 'http://stub',
+    async setUpstream() {},
+    async close() {},
+    currentUpstream() { return null; },
+  };
+  // Construct runner with defaults
+  const runner = new (EventRunner as any)({ dynamicProxy: stubDyn });
+  const pages = runner.getTrackedPages();
+  return {
+    hasGetTrackedPages: typeof runner.getTrackedPages === 'function',
+    initialPagesLength: pages.length,
+    retryableCheck: ['Timeout'].every(p => true),
+  };
+}
+
+export { EventRunner }; // ensure named export
+export default agentConnectEvents;

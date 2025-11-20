@@ -6,7 +6,7 @@ import { EventRunner } from './event-runner';
 const ENV_MAX_RETRIES = Math.max(0, parseInt(process.env.ALUVIA_MAX_RETRIES || "2", 10)); // prettier-ignore
 const ENV_BACKOFF_MS  = Math.max(0, parseInt(process.env.ALUVIA_BACKOFF_MS  || "300", 10)); // prettier-ignore
 const ENV_RETRY_ON = (
-  process.env.ALUVIA_RETRY_ON ?? "ECONNRESET,ETIMEDOUT,net::ERR,Timeout"
+  process.env.ALUVIA_RETRY_ON ?? "ECONNRESET,ETIMEDOUT,net::ERR,Timeout,net::ERR_ABORTED"
 )
   .split(",")
   .map((value) => value.trim())
@@ -328,30 +328,4 @@ export interface DynamicProxy {
   currentUpstream(): ProxySettings | null;
 }
 
-export { EventRunner };
-
-export function agentConnectEvents(browserContext: import('playwright').BrowserContext, options: Omit<AgentConnectOptions, 'dynamicProxy'> & { dynamicProxy: DynamicProxy }) {
-  const {
-    dynamicProxy,
-    maxRetries = ENV_MAX_RETRIES,
-    backoffMs = ENV_BACKOFF_MS,
-    retryOn = DEFAULT_RETRY_PATTERNS,
-    proxyProvider,
-    onRetry,
-    onProxyLoaded,
-  } = options;
-  const runner = new EventRunner({
-    dynamicProxy,
-    maxRetries,
-    backoffMs,
-    retryOn,
-    proxyProvider,
-    onRetry,
-    onProxyLoaded,
-    getAluviaProxy,
-    AluviaErrorCtor: AluviaError,
-    AluviaErrorCode,
-  });
-  runner.listen(browserContext);
-  return runner;
-}
+export { EventRunner, agentConnectEvents, runEventRunnerSelfTest } from './event-runner';
