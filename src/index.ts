@@ -2,7 +2,6 @@ import type {
   BrowserContext,
   Page,
   Response,
-  Request,
 } from "playwright";
 import { Server as ProxyChainServer } from "proxy-chain";
 import { EventEmitter } from "events";
@@ -265,9 +264,6 @@ function generateSessionId(): string {
 
 const GOTO_ORIGINAL = Symbol.for("aluvia.gotoOriginal");
 const CONTEXT_LISTENER_ATTACHED = new WeakSet<BrowserContext>();
-// Added WeakMaps to manage per-context emitters and page sets
-const CONTEXT_EMITTER = new WeakMap<BrowserContext, EventEmitter>();
-const CONTEXT_PAGE_SET = new WeakMap<BrowserContext, Set<Page>>();
 
 export function agentConnect(
   page: Page,
@@ -434,30 +430,4 @@ export interface DynamicProxy {
   close(): Promise<void>;
   /** Returns the currently configured upstream settings (if any) */
   currentUpstream(): ProxySettings | null;
-}
-
-export function listen(context: BrowserContext): EventEmitter {
-  let emitter = CONTEXT_EMITTER.get(context);
-  if (emitter) return emitter;
-
-  emitter = new EventEmitter();
-  CONTEXT_EMITTER.set(context, emitter);
-
-  const pages = new Set<Page>();
-  CONTEXT_PAGE_SET.set(context, pages);
-
-  const attachPage = (page: Page) => {
-    if (pages.has(page)) return;
-    pages.add(page);
-    page.on("requestfailed", (request: Request) => {
-      emitter!.emit("aluviaError", request);
-    });
-  };
-
-  // Attach existing pages
-  for (const p of context.pages()) attachPage(p);
-  // Listen for future pages
-  context.on("page", attachPage);
-
-  return emitter;
 }
