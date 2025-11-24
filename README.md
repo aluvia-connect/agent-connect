@@ -143,6 +143,55 @@ const { response, page } = await agentConnect(page, {
 });
 ```
 
+## Status & Error Listener
+
+You can observe page-level load successes and selected Playwright request failures using the `agentConnectListener()` helper. It attaches to every existing and future page in a `BrowserContext` and emits an `aluviastatus` event.
+
+### Import
+
+```ts
+import { agentConnectListener } from "@aluvia-connect/agent-connect";
+```
+
+### Usage
+
+```ts
+const context = await browser.newContext();
+// Only emit error events for matching substrings
+const statusEmitter = agentConnectListener(context, { errorOn: ["TimeoutError", "ECONNRESET"] });
+
+statusEmitter.on("aluviastatus", (payload) => {
+  if (payload.state === "success") {
+    console.log("Page load completed");
+  } else if (payload.state === "error") {
+    // payload.request is the Playwright Request that failed
+    console.warn("Monitored request failed:", payload.request.url());
+  }
+});
+```
+
+### Event Payloads
+
+The listener emits standardized payload objects:
+
+- On page load reaching the `load` state: `{ state: "success" }`
+- On a failed network request whose error text contains one of the configured patterns: `{ state: "error", request: Request }`
+
+No event is emitted for failed requests that do not match any `errorOn` pattern.
+
+### Options
+
+| Option    | Type            | Default                                                     | Description                                                                                             |
+|-----------|-----------------|-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `errorOn` | `string[]`      | `["ECONNRESET", "ETIMEDOUT", "net::ERR", "Timeout"]` | Substrings to match against `request.failure()?.errorText`. If any pattern is included, an error event is emitted. |
+
+### Notes
+
+- The listener is per `BrowserContext`; repeated calls with the same context return the same internal emitter.
+- Newly created pages (`context.on('page')`) are automatically wired—no manual re-attachment needed.
+- You can combine this with `agentConnect()` to observe navigation health while retries occur.
+- All events are emitted using Node.js `EventEmitter`; remove listeners with `statusEmitter.removeListener(...)` if required.
+
 ## Requirements
 
 - Node.js >= 18
