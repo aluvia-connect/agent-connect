@@ -66,29 +66,49 @@ async function main() {
     }
   });
 
-  const TEST_URL = 'http://10.255.255.1'; // Unroutable (will likely fail / timeout)
-  console.log('[nav] Navigating (direct, expect failure):', TEST_URL);
-  try {
-    await page.goto(TEST_URL, { timeout: 8000 }).catch(err => {
-      console.warn('[nav] Initial navigation error (expected):', err.message);
+  // Helper: wait for the next aluviastatus event (error or success)
+  function waitForStatus() {
+    return new Promise(resolve => {
+      emitter.once('aluviastatus', resolve);
     });
-  } catch (err) {
-    console.warn('[nav] Navigation threw:', err.message);
   }
 
-  // Wait a bit to allow failed requests + listener to apply upstream
-  await new Promise(r => setTimeout(r, 3000));
-  console.log('[nav] Current upstream after listener phase:', dynamic.currentUpstream());
+  const TARGET_URL = 'http://10.255.255.1'; // Unroutable (expected to trigger errors first)
+  const MAX_ATTEMPTS = 5;
+  let attempt = 0;
+  let succeeded = false;
 
-  // Second navigation should go through upstream proxy (if applied)
-  const SECOND_URL = 'https://example.com';
-  console.log('[nav] Navigating again (should use upstream if set):', SECOND_URL);
-  try {
-    await page.goto(SECOND_URL, { timeout: 15000, waitUntil: 'domcontentloaded' });
-    console.log('[nav] Second navigation title:', await page.title());
-  } catch (err) {
-    console.error('[nav] Second navigation failed:', err.message);
+  while (attempt < MAX_ATTEMPTS && !succeeded) {
+    attempt++;
+    console.log(`\n[loop] Attempt ${attempt}/${MAX_ATTEMPTS} navigating to ${TARGET_URL}`);
+    try {
+      await page.goto(TARGET_URL, { timeout: 8000 }).catch(err => {
+        console.warn('[nav] page.goto threw (continuing to wait for status):', err.message);
+      });
+    } catch (err) {
+      console.warn('[nav] Navigation outer try threw:', err.message);
+    }
+
+    // Wait for first status event (either request error or load success)
+    const status = await waitForStatus();
+    if (status.state === 'success') {
+      console.log('[loop] Success status received. Exiting loop.');
+      succeeded = true;
+      break;
+    }
+
+    if (status.state === 'error') {
+      console.log('[loop] Error status received. Reloading page...');
+      try {
+        await page.reload({ timeout: 8000 });
+        // After reload we still must wait for a success event; continue loop.
+      } catch (err) {
+        console.warn('[loop] page.reload failed:', err.message);
+      }
+    }
   }
+
+  console.log('[loop] Finished with succeeded =', succeeded, ' current upstream =', dynamic.currentUpstream());
 
   // Clean up
   await browser.close();
@@ -97,4 +117,3 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
-
