@@ -37,8 +37,11 @@ export function agentConnectListener(context: BrowserContext, options?: AgentCon
     page.on("requestfailed", (request: Request) => {
       const errorText = request.failure()?.errorText || "";
       if (errorOn.some(pattern => errorText.includes(pattern))) {
-        emitter!.emit("aluviaError", request);
+        emitter!.emit("aluviastatus", {state: 'error', request: request});
       }
+    });
+    page.on("load", () => {
+      emitter!.emit("aluviastatus", {state: 'success'});
     });
   };
 

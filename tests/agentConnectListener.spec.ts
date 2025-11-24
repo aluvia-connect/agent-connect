@@ -31,7 +31,7 @@ describe("agentConnectListener (errorOn filtering)", () => {
     });
 
     const handler = vi.fn();
-    emitter.on("aluviaError", handler);
+    emitter.on("aluviastatus", handler);
 
     const timeoutRequest = {
       url: "http://example.com/timeout",
@@ -42,11 +42,11 @@ describe("agentConnectListener (errorOn filtering)", () => {
       failure: () => ({ errorText: "DNSResolveError" }),
     };
 
-    pageEmitter.emit("requestfailed", timeoutRequest);
-    pageEmitter.emit("requestfailed", dnsRequest);
+    pageEmitter.emit("requestfailed", timeoutRequest as any);
+    pageEmitter.emit("requestfailed", dnsRequest as any);
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith(timeoutRequest);
+    expect(handler).toHaveBeenCalledWith({ state: "error", request: timeoutRequest });
   });
 
   it("emits for multiple configured error types", () => {
@@ -58,7 +58,7 @@ describe("agentConnectListener (errorOn filtering)", () => {
     });
 
     const handler = vi.fn();
-    emitter.on("aluviaError", handler);
+    emitter.on("aluviastatus", handler);
 
     const timeoutRequest = {
       url: "http://example.com/timeout",
@@ -73,12 +73,30 @@ describe("agentConnectListener (errorOn filtering)", () => {
       failure: () => ({ errorText: "TLSHandshakeError" }),
     };
 
-    pageEmitter.emit("requestfailed", timeoutRequest);
-    pageEmitter.emit("requestfailed", connRefusedRequest);
-    pageEmitter.emit("requestfailed", otherRequest);
+    pageEmitter.emit("requestfailed", timeoutRequest as any);
+    pageEmitter.emit("requestfailed", connRefusedRequest as any);
+    pageEmitter.emit("requestfailed", otherRequest as any);
 
     expect(handler).toHaveBeenCalledTimes(2);
-    expect(handler).toHaveBeenNthCalledWith(1, timeoutRequest);
-    expect(handler).toHaveBeenNthCalledWith(2, connRefusedRequest);
+    expect(handler).toHaveBeenNthCalledWith(1, { state: "error", request: timeoutRequest });
+    expect(handler).toHaveBeenNthCalledWith(2, { state: "error", request: connRefusedRequest });
+  });
+
+  it("emits success status on page load", () => {
+    const pageEmitter = new EventEmitter();
+    const context = makeContextWithSinglePage(pageEmitter);
+
+    const emitter = agentConnectListener(context as any, {
+      errorOn: ["TimeoutError"],
+    });
+
+    const handler = vi.fn();
+    emitter.on("aluviastatus", handler);
+
+    // Simulate load
+    pageEmitter.emit("load");
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ state: "success" });
   });
 });
