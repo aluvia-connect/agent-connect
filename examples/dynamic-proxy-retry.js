@@ -11,7 +11,8 @@
  *   ALUVIA_TOKEN=<API KEY> node examples/dynamic-proxy-retry.js
  */
 import { chromium } from 'playwright';
-import { agentConnect, startDynamicProxy } from '@aluvia-connect/agent-connect';
+//import { agentConnect, startDynamicProxy } from '@aluvia-connect/agent-connect';
+import { agentConnect, startDynamicProxy } from './../dist/esm/src/index.js';
 
 // Retry on common timeout/network indicators.
 process.env.ALUVIA_RETRY_ON = 'Timeout,ETIMEDOUT,net::ERR';

@@ -10,7 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
     "module": "ESNext",
-    "moduleResolution": "Node"
+    "moduleResolution": "Node16"
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist", "test"]

@@ -16,7 +16,8 @@
  *   node examples/dynamic-proxy-listener.js
  */
 import { chromium } from 'playwright';
-import { startDynamicProxy, agentConnectListener } from '@aluvia-connect/agent-connect';
+//import { startDynamicProxy, agentConnectListener } from '@aluvia-connect/agent-connect';
+import { agentConnectListener, startDynamicProxy } from './../dist/esm/src/index.js';
 import Aluvia from 'aluvia-ts-sdk';
 
 // Patterns that, when found in request failure errorText, trigger upstream switch
@@ -49,6 +50,9 @@ async function main() {
 
   // Attach listener that will switch upstream on first qualifying failed request
   let upstreamSet = false;
+  // Buffer the latest status and resolve any pending waiter
+  let lastStatus = null;
+  let pendingResolve = null;
   const emitter = agentConnectListener(context, { errorOn: ERROR_PATTERNS });
   emitter.on('aluviastatus', async (payload) => {
     if (payload.state === 'error' && !upstreamSet) {
@@ -64,16 +68,34 @@ async function main() {
     } else if (payload.state === 'success') {
       console.log('[listener] Page load success');
     }
+    // buffer and resolve any waiter
+    lastStatus = payload;
+    if (pendingResolve) {
+      pendingResolve(payload);
+      pendingResolve = null;
+    }
   });
 
   // Helper: wait for the next aluviastatus event (error or success)
   function waitForStatus() {
-    return new Promise(resolve => {
-      emitter.once('aluviastatus', resolve);
-    });
+    // immediate if already buffered
+    if (lastStatus) return Promise.resolve(lastStatus);
+
+    return Promise.race([
+      new Promise(resolve => {
+        emitter.once('aluviastatus', resolve);
+      }),
+      new Promise((resolve, reject) => {
+        setTimeout(() => {
+          resolve('TimeoutError: Timeout 10000ms exceeded.');
+        }, 30000)
+      })
+    ]);
   }
 
-  const TARGET_URL = 'http://10.255.255.1'; // Unroutable (expected to trigger errors first)
+  //const TARGET_URL = 'https://www.aluvia.io/'; // Unroutable (expected to trigger errors first)
+  //const TARGET_URL = 'https://denniskrol.nl/'; // Unroutable (expected to trigger errors first)
+  const TARGET_URL = 'https://2captcha.com/demo/cloudflare-turnstile-challenge'; // Unroutable (expected to trigger errors first)
   const MAX_ATTEMPTS = 5;
   let attempt = 0;
   let succeeded = false;
@@ -81,8 +103,10 @@ async function main() {
   while (attempt < MAX_ATTEMPTS && !succeeded) {
     attempt++;
     console.log(`\n[loop] Attempt ${attempt}/${MAX_ATTEMPTS} navigating to ${TARGET_URL}`);
+    // reset buffer so we only consider events for this attempt
+    lastStatus = null;
     try {
-      await page.goto(TARGET_URL, { timeout: 8000 }).catch(err => {
+      await page.goto(TARGET_URL, { timeout: 30000 }).catch(err => {
         console.warn('[nav] page.goto threw (continuing to wait for status):', err.message);
       });
     } catch (err) {
@@ -91,29 +115,32 @@ async function main() {
 
     // Wait for first status event (either request error or load success)
     const status = await waitForStatus();
-    if (status.state === 'success') {
-      console.log('[loop] Success status received. Exiting loop.');
-      succeeded = true;
-      break;
-    }
-
     if (status.state === 'error') {
-      console.log('[loop] Error status received. Reloading page...');
+      console.log(`[loop] Error status received: ${status.reason} (${status.details.patterns}). Reloading page...`);
       try {
-        await page.reload({ timeout: 8000 });
+        await page.reload({ timeout: 30000 });
         // After reload we still must wait for a success event; continue loop.
+        continue;
       } catch (err) {
         console.warn('[loop] page.reload failed:', err.message);
       }
     }
+    succeeded = true;
   }
 
   console.log('[loop] Finished with succeeded =', succeeded, ' current upstream =', dynamic.currentUpstream());
+
+  // Wait 30 seconds so we can show the page
+  if (succeeded) {
+    console.log('[done] Navigation succeeded, waiting 30 seconds before cleanup...');
+    await new Promise(resolve => setTimeout(resolve, 30000));
+    }
 
   // Clean up
   await browser.close();
   await dynamic.close();
   console.log('[done] Browser & dynamic proxy closed');
+  process.exit();
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
